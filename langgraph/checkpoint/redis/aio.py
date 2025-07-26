@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from types import TracebackType
 from typing import (
@@ -82,6 +83,8 @@ class AsyncRedisSaver(
             ttl=ttl,
         )
         self.loop = asyncio.get_running_loop()
+        # Per-thread locks for async operations
+        self._thread_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     def configure_client(
         self,
@@ -113,6 +116,16 @@ class AsyncRedisSaver(
         self.checkpoint_writes_index = AsyncSearchIndex.from_dict(
             self.SCHEMAS[2], redis_client=self._redis
         )
+
+    @asynccontextmanager
+    async def athread_lock(self, thread_id: str) -> AsyncIterator[None]:
+        """Async context manager to serialize access per thread."""
+        lock = self._thread_locks[thread_id]
+        await lock.acquire()
+        try:
+            yield
+        finally:
+            lock.release()
 
     async def __aenter__(self) -> AsyncRedisSaver:
         """Async context manager enter."""

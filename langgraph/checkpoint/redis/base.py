@@ -3,7 +3,10 @@ import binascii
 import json
 import random
 from abc import abstractmethod
-from typing import Any, Dict, Generic, List, Optional, Sequence, Tuple, cast
+from collections import defaultdict
+from contextlib import contextmanager
+from threading import Lock
+from typing import Any, Dict, Generic, Iterator, List, Optional, Sequence, Tuple, cast
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import (
@@ -122,6 +125,9 @@ class BaseRedisSaver(BaseCheckpointSaver[str], Generic[RedisClientType, IndexTyp
         # Store TTL configuration
         self.ttl_config = ttl
 
+        # Per-thread locks to serialize operations
+        self._thread_locks: dict[str, Lock] = defaultdict(Lock)
+
         self.configure_client(
             redis_url=redis_url,
             redis_client=redis_client,
@@ -148,6 +154,16 @@ class BaseRedisSaver(BaseCheckpointSaver[str], Generic[RedisClientType, IndexTyp
     ) -> None:
         """Configure the Redis client."""
         pass
+
+    @contextmanager
+    def thread_lock(self, thread_id: str) -> Iterator[None]:
+        """Context manager to serialize access per thread."""
+        lock = self._thread_locks[thread_id]
+        lock.acquire()
+        try:
+            yield
+        finally:
+            lock.release()
 
     def set_client_info(self) -> None:
         """Set client info for Redis monitoring."""
